@@ -1,10 +1,10 @@
-use std::io::{BufWriter, Write};
+use std::io::{stdin, BufWriter, Write};
 use std::time::Instant;
 
 type Ip = u32;
 type Cidr = u32;
 
-fn create_netmask(cidr: Cidr) -> Result<(Ip, Ip), String> {
+fn create_netmask(cidr: Cidr) -> Result<(Ip, Ip), &'static str> {
     let base: u32 = 2;
     let base2: u32 = 256;
     let netmask: Ip;
@@ -14,7 +14,7 @@ fn create_netmask(cidr: Cidr) -> Result<(Ip, Ip), String> {
         let num: u32 = base.pow(8 - cidr);
 
         if num >= 255 {
-            netmask = 4278190080; // 255.0.0.0
+            netmask = 0xff000000; // 255.0.0.0
         } else if num <= 1 {
             netmask = 0; // 0.0.0.0
         } else {
@@ -26,11 +26,11 @@ fn create_netmask(cidr: Cidr) -> Result<(Ip, Ip), String> {
         let num: u32 = base.pow(16 - cidr);
 
         if num >= 255 {
-            netmask = 4294901760; // 255.255.0.0
+            netmask = 0xffff0000; // 255.255.0.0
         } else if num <= 1 {
-            netmask = 4278190080; // 255.0.0.0
+            netmask = 0xff000000; // 255.0.0.0
         } else {
-            netmask = 4278190080 + (base2.pow(3) - (num * base2.pow(2)));
+            netmask = 0xff000000 + (base2.pow(3) - (num * base2.pow(2)));
         }
 
         wildmask = !netmask;
@@ -38,11 +38,11 @@ fn create_netmask(cidr: Cidr) -> Result<(Ip, Ip), String> {
         let num: u32 = base.pow(24 - cidr);
 
         if num >= 255 {
-            netmask = 4294967040; // 255.255.255.0
+            netmask = 0xffffff00; // 255.255.255.0
         } else if num <= 1 {
-            netmask = 4294901760; // 255.255.0.0
+            netmask = 0xffff0000; // 255.255.0.0
         } else {
-            netmask = 4294901760 + (base2.pow(2) - (num * base2.pow(1)));
+            netmask = 0xffff0000 + (base2.pow(2) - (num * base2.pow(1)));
         }
 
         wildmask = !netmask;
@@ -50,16 +50,16 @@ fn create_netmask(cidr: Cidr) -> Result<(Ip, Ip), String> {
         let num: u32 = base.pow(32 - cidr);
 
         if num >= 255 {
-            netmask = 4294967295; // 255.255.255.255
+            netmask = 0xffffffff; // 255.255.255.255
         } else if num <= 1 {
-            netmask = 4294967040; // 255.255.255.0
+            netmask = 0xffffff00; // 255.255.255.0
         } else {
-            netmask = 4294967040 + (256 - num);
+            netmask = 0xffffff00 + (256 - num);
         }
 
         wildmask = !netmask;
     } else {
-        return Err(String::from("Cidr should be in between 0 and 32!"));
+        return Err("Cidr should be in between 0 and 32!");
     }
 
     Ok((netmask, wildmask))
@@ -83,7 +83,7 @@ struct SubNet {
 }
 
 impl SubNet {
-    pub fn from(ip: Ip, cidr: Cidr) -> Result<Self, String> {
+    pub fn from(ip: Ip, cidr: Cidr) -> Result<Self,&'static str> {
         let base: u32 = 2;
         let network: Ip;
         let first: Ip;
@@ -98,13 +98,13 @@ impl SubNet {
             broadcast = ip;
             nb_ip = 1;
         } else if cidr == 31 {
-            network = create_network(&4294967294, &ip); // 255.255.255.254
+            network = create_network(&0xfffffffe, &ip); // 255.255.255.254
             first = network;
             last = network + 1;
             broadcast = last;
             nb_ip = 2;
         } else {
-            let result = create_netmask(cidr).unwrap();
+            let result = create_netmask(cidr)?;
             let netmask = result.0;
             let wildmask = result.1;
             network = create_network(&netmask, &ip);
@@ -124,13 +124,11 @@ impl SubNet {
         })
     }
 
-    pub fn split_in_subs(&self, cidr: Cidr) -> Result<Vec<String>, String> {
+    pub fn split_in_subs<'a>(&self, cidr: Cidr) -> Result<Vec<String>, &'a str> {
         let mut vec: Vec<String> = vec![];
 
         if cidr < self.cidr {
-            return Err(String::from(
-                "Cidr can't be smaller than the current subnet one!",
-            ));
+            return Err("Cidr can't be smaller than the current subnet one!");
         }
 
         let base: u32 = 2;
@@ -139,7 +137,6 @@ impl SubNet {
 
         for _i in 0..base.pow(cidr - self.cidr) {
             let next_sub = SubNet::from(next_network, cidr).unwrap();
-
             next_network = next_sub.broadcast + 1;
 
             vec.push(next_sub.serialise_json());
@@ -183,14 +180,29 @@ impl std::fmt::Display for SubNet {
     }
 }
 
+fn parse_ip(raw_ip: &String) -> Result<Ip, &str> {
+    let str_splice = raw_ip.split(".");
+    let nb: usize = 4;
+
+    if &str_splice.count() != &nb {
+        return Err("The inserted value isn't an proprely formated ip!");
+    }
+
+    Ok(45)
+}
+
 fn main() {
+    let mut raw_ip = String::new();
+
+    // Read ip from stdin
+    println!("Ip address: ");
+    stdin().read_line(&mut raw_ip).expect("failed to readline");
+
     let start = Instant::now();
 
-    let ip: Ip = 167772160; // 10.0.0.0
+    let ip: Ip = parse_ip(&raw_ip).unwrap();
 
-    let sub = SubNet::from(ip, 8);
-
-    let subnet = match sub {
+    let subnet = match SubNet::from(ip, 8) {
         Ok(s) => s,
         Err(e) => panic!("{}", e),
     };
