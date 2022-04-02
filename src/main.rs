@@ -10,10 +10,9 @@ fn create_netmask(cidr: Cidr) -> Result<(Ip, Ip), String> {
     }
 
     let right_len = 32 - cidr;
-    let all_bits = u32::MAX;
-    let mask = (all_bits >> right_len) << right_len;
+    let netmask = (u32::MAX >> right_len) << right_len;
 
-    Ok((mask, !mask))
+    Ok((netmask, !netmask))
 }
 
 fn create_network(netmask: &Ip, ip: &Ip) -> Ip {
@@ -30,7 +29,7 @@ struct SubNet {
     pub last: Ip,
     pub broadcast: Ip,
     pub cidr: Cidr,
-    pub nb_ip: u32,
+    pub nb_usable_ip: u32,
 }
 
 impl SubNet {
@@ -40,20 +39,20 @@ impl SubNet {
         let first: Ip;
         let last: Ip;
         let broadcast: Ip;
-        let nb_ip: u32;
+        let nb_usable_ip: u32;
 
         if cidr == 32 {
             network = ip;
             first = ip;
             last = ip;
             broadcast = ip;
-            nb_ip = 0;
+            nb_usable_ip = 0;
         } else if cidr == 31 {
-            network = create_network(&0xfffffffe, &ip); // 255.255.255.254
+            network = create_network(&0xfffffffe, &ip);
             first = network;
             last = network + 1;
             broadcast = last;
-            nb_ip = 0;
+            nb_usable_ip = 0;
         } else {
             let result = create_netmask(cidr)?;
             let netmask = result.0;
@@ -62,7 +61,7 @@ impl SubNet {
             first = network + 1;
             broadcast = create_broadcast(&network, &wildmask);
             last = broadcast - 1;
-            nb_ip = base.pow((32 - cidr).into()) - 2;
+            nb_usable_ip = base.pow((32 - cidr).into()) - 2;
         }
 
         Ok(SubNet {
@@ -71,7 +70,7 @@ impl SubNet {
             last,
             broadcast,
             cidr,
-            nb_ip,
+            nb_usable_ip,
         })
     }
 
@@ -124,7 +123,7 @@ impl SubNet {
             broadcast[1],
             broadcast[2],
             broadcast[3],
-            self.nb_ip
+            self.nb_usable_ip
         )
     }
 }
