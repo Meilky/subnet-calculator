@@ -4,65 +4,16 @@ use std::time::Instant;
 type Ip = u32;
 type Cidr = u32;
 
-fn create_netmask(cidr: Cidr) -> Result<(Ip, Ip), &'static str> {
-    let base: u32 = 2;
-    let base2: u32 = 256;
-    let netmask: Ip;
-    let wildmask: Ip;
-
-    if (0..8).contains(&cidr) {
-        let num: u32 = base.pow(8 - cidr);
-
-        if num >= 255 {
-            netmask = 0xff000000; // 255.0.0.0
-        } else if num <= 1 {
-            netmask = 0; // 0.0.0.0
-        } else {
-            netmask = (u32::MAX - (num * base2.pow(3))) + 1;
-        }
-
-        wildmask = !netmask;
-    } else if (8..16).contains(&cidr) {
-        let num: u32 = base.pow(16 - cidr);
-
-        if num >= 255 {
-            netmask = 0xffff0000; // 255.255.0.0
-        } else if num <= 1 {
-            netmask = 0xff000000; // 255.0.0.0
-        } else {
-            netmask = 0xff000000 + (base2.pow(3) - (num * base2.pow(2)));
-        }
-
-        wildmask = !netmask;
-    } else if (16..24).contains(&cidr) {
-        let num: u32 = base.pow(24 - cidr);
-
-        if num >= 255 {
-            netmask = 0xffffff00; // 255.255.255.0
-        } else if num <= 1 {
-            netmask = 0xffff0000; // 255.255.0.0
-        } else {
-            netmask = 0xffff0000 + (base2.pow(2) - (num * base2.pow(1)));
-        }
-
-        wildmask = !netmask;
-    } else if (24..33).contains(&cidr) {
-        let num: u32 = base.pow(32 - cidr);
-
-        if num >= 255 {
-            netmask = 0xffffffff; // 255.255.255.255
-        } else if num <= 1 {
-            netmask = 0xffffff00; // 255.255.255.0
-        } else {
-            netmask = 0xffffff00 + (256 - num);
-        }
-
-        wildmask = !netmask;
-    } else {
-        return Err("Cidr should be in between 0 and 32!");
+fn create_netmask(cidr: Cidr) -> Result<(Ip, Ip), String> {
+    if cidr > 32 {
+        return Err("Cidr should be in between 0 and 32!".to_string());
     }
 
-    Ok((netmask, wildmask))
+    let right_len = 32 - cidr;
+    let all_bits = u32::MAX;
+    let mask = (all_bits >> right_len) << right_len;
+
+    Ok((mask, !mask))
 }
 
 fn create_network(netmask: &Ip, ip: &Ip) -> Ip {
@@ -83,7 +34,7 @@ struct SubNet {
 }
 
 impl SubNet {
-    pub fn from(ip: Ip, cidr: Cidr) -> Result<Self, &'static str> {
+    pub fn from(ip: Ip, cidr: Cidr) -> Result<Self, String> {
         let base: u32 = 2;
         let network: Ip;
         let first: Ip;
@@ -96,13 +47,13 @@ impl SubNet {
             first = ip;
             last = ip;
             broadcast = ip;
-            nb_ip = 1;
+            nb_ip = 0;
         } else if cidr == 31 {
             network = create_network(&0xfffffffe, &ip); // 255.255.255.254
             first = network;
             last = network + 1;
             broadcast = last;
-            nb_ip = 2;
+            nb_ip = 0;
         } else {
             let result = create_netmask(cidr)?;
             let netmask = result.0;
@@ -111,7 +62,7 @@ impl SubNet {
             first = network + 1;
             broadcast = create_broadcast(&network, &wildmask);
             last = broadcast - 1;
-            nb_ip = base.pow((32 - cidr).into());
+            nb_ip = base.pow((32 - cidr).into()) - 2;
         }
 
         Ok(SubNet {
@@ -124,11 +75,15 @@ impl SubNet {
         })
     }
 
-    pub fn split_in_subs(&self, cidr: Cidr) -> Result<Vec<String>, &'static str> {
+    pub fn split_in_subs(&self, cidr: Cidr) -> Result<Vec<String>, String> {
         let mut vec: Vec<String> = vec![];
 
         if cidr < self.cidr {
-            return Err("Cidr can't be smaller than the current subnet one!");
+            return Err("Cidr can't be smaller than the current subnet one!".to_string());
+        }
+
+        if cidr == 32 || cidr == 31 {
+            return Ok(vec![self.serialise_json()]);
         }
 
         let base: u32 = 2;
@@ -136,7 +91,7 @@ impl SubNet {
         let mut next_network = self.network;
 
         for _i in 0..base.pow(cidr - self.cidr) {
-            let next_sub = SubNet::from(next_network, cidr).unwrap();
+            let next_sub = SubNet::from(next_network, cidr)?;
             next_network = next_sub.broadcast + 1;
 
             vec.push(next_sub.serialise_json());
@@ -152,7 +107,7 @@ impl SubNet {
         let broadcast: [u8; 4] = self.broadcast.to_be_bytes();
 
         format!(
-            "{{\n\t\"network\": \"{}.{}.{}.{}\",\n\t\"first\": \"{}.{}.{}.{}\",\n\t\"last\": \"{}.{}.{}.{}\",\n\t\"broadcast\": \"{}.{}.{}.{}\",\n\t\"nbIp\": {}\n}}",
+            "{{\n\t\"network\": \"{}.{}.{}.{}\",\n\t\"first\": \"{}.{}.{}.{}\",\n\t\"last\": \"{}.{}.{}.{}\",\n\t\"broadcast\": \"{}.{}.{}.{}\",\n\t\"nbUsableIp\": {}\n}}",
             network[0],
             network[1],
             network[2],
@@ -222,12 +177,16 @@ fn parse_cidr(raw_cidr: String) -> Result<Cidr, String> {
     Ok(cidr)
 }
 
-fn parse_min_nb(raw_nb: String, cidr: &Cidr) -> Result<u32, String> {
+fn parse_min_nb(raw_nb: String, cidr: Cidr) -> Result<u32, String> {
     let base: u32 = 2;
     let nb: u32 = raw_nb
         .trim()
         .parse::<u32>()
         .expect("The min nb of ip is not a number");
+
+    if cidr == 32 || cidr == 31 {
+        return Ok(0);
+    }
 
     if base.pow(32 - cidr) - 2 < nb {
         return Err(
@@ -248,32 +207,54 @@ fn parse_input(raw_ip: String, raw_nb: String) -> Result<(Ip, Cidr, u32), String
 
     let ip = parse_ip(split_ip.get(0).expect("No ip provided").to_string())?;
     let cidr = parse_cidr(split_ip.get(1).expect("No cidr provided").to_string())?;
-    let min_nb: u32 = parse_min_nb(raw_nb, &cidr)?;
+    let min_nb: u32 = parse_min_nb(raw_nb, cidr)?;
 
     Ok((ip, cidr, min_nb))
 }
 
+fn find_cidr_from_min_ip(min_ip: u32, cidr: Cidr) -> Result<Cidr, String> {
+    let base: u32 = 2;
+
+    if cidr == 32 || cidr == 31 {
+        return Ok(cidr);
+    }
+
+    for i in (0..=30).rev() {
+        if base.pow(
+            (32 - i)
+                .try_into()
+                .expect("Problem while parsing some numbers"),
+        ) - 2
+            >= min_ip
+        {
+            return Ok(i);
+        }
+    }
+
+    Err("No cidr found for your network".to_string())
+}
+
 fn main() {
     let mut raw_ip = String::new();
-    println!("Ip address: ");
+    println!("Ip address (<ip>/<cidr>):");
     stdin().read_line(&mut raw_ip).expect("failed to readline");
 
     let mut raw_nb = String::new();
-    println!("Min nb address by subnet: ");
+    println!("Minimum number of usable ip per subnets:");
     stdin().read_line(&mut raw_nb).expect("failed to readline");
 
-    let (ip, cidr, min_nb) = parse_input(raw_ip, raw_nb).unwrap();
-
-    println!("{},{},{}",ip,cidr,min_nb);
-
     let start = Instant::now();
+
+    let (ip, cidr, min_ip) = parse_input(raw_ip, raw_nb).unwrap();
+
+    let sub_cidr = find_cidr_from_min_ip(min_ip, cidr).unwrap();
 
     let subnet = match SubNet::from(ip, cidr) {
         Ok(s) => s,
         Err(e) => panic!("{}", e),
     };
 
-    let subs = subnet.split_in_subs(30);
+    let subs = subnet.split_in_subs(sub_cidr);
 
     let b_write = Instant::now();
     println!(
