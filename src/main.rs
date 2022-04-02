@@ -91,7 +91,7 @@ fn find_sub_cidr(min_ip: u32, cidr: Cidr) -> Result<Cidr, String> {
         return Ok(cidr);
     }
 
-    for i in (0..=30).rev() {
+    for i in (0..=31).rev() {
         if base.pow(
             (32 - i)
                 .try_into()

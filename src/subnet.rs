@@ -56,7 +56,7 @@ impl SubNet {
             return Err("Cidr can't be smaller than the current subnet one!".to_string());
         }
 
-        if cidr == 32 || cidr == 31 {
+        if cidr == 32 {
             return Ok(vec![self.serialise_json()]);
         }
 
