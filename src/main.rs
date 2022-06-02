@@ -1,11 +1,20 @@
-use std::io::{stdin, BufWriter, Write};
+use mmap::{MapOption, MemoryMap};
+use std::fs;
+use std::io::{stdin, Seek, SeekFrom, Write};
+use std::os::unix::prelude::AsRawFd;
+use std::ptr;
 use std::time::Instant;
+
 
 mod subnet;
 mod utils;
 
 use subnet::SubNet;
 use utils::{Cidr, Ip};
+
+// from crates.io
+extern crate libc;
+extern crate mmap;
 
 fn parse_ip(raw_ip: String) -> Result<Ip, String> {
     let split_ip: Vec<&str> = raw_ip.split(".").collect();
@@ -138,14 +147,41 @@ fn main() {
         std::fs::remove_file("file.json").expect("remove failed");
     }
 
-    let mut file: BufWriter<std::fs::File> =
-        BufWriter::new(std::fs::File::create("file.json").unwrap());
+    let mut f = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open("file.json")
+        .unwrap();
 
-    let _ = write!(file, "[\n");
-    for sub in subs.unwrap() {
-        let _ = write!(file, "{},", sub);
+    let join_string:String = subs.unwrap().join("");
+    let src = join_string.to_owned();
+    let src_data = src.as_bytes();
+    let size = src.len();
+
+    // Allocate space in the file first
+    f.seek(SeekFrom::Start(size as u64)).unwrap();
+    f.write_all(&[0]).unwrap();
+    f.seek(SeekFrom::Start(0)).unwrap();
+
+    let mmap_opts = &[
+        // Then make the mapping *public* so it is written back to the file
+        MapOption::MapNonStandardFlags(libc::MAP_SHARED),
+        MapOption::MapReadable,
+        MapOption::MapWritable,
+        MapOption::MapFd(f.as_raw_fd()),
+    ];
+
+    let mmap = MemoryMap::new(size, mmap_opts).unwrap();
+
+    let data = mmap.data();
+
+    if data.is_null() {
+        panic!("Could not access data from memory mapped file")
     }
-    let _ = write!(file, "\n]");
+    unsafe {
+        ptr::copy(src_data.as_ptr(), data, src_data.len());
+    }
 
     let end = Instant::now();
 
