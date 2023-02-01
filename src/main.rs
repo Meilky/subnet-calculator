@@ -1,20 +1,15 @@
-use mmap::{MapOption, MemoryMap};
-use std::fs;
-use std::io::{stdin, Seek, SeekFrom, Write};
-use std::os::unix::prelude::AsRawFd;
-use std::ptr;
+use std::io::{stdin, BufWriter, Write};
 use std::time::Instant;
 
+type Ip = u32;
+type Cidr = u32;
 
-mod subnet;
-mod utils;
+fn create_netmask(cidr: Cidr) -> (Ip, Ip) {
+    let right_len = 32 - cidr;
+    let netmask = (u32::MAX >> right_len) << right_len;
 
-use subnet::SubNet;
-use utils::{Cidr, Ip};
-
-// from crates.io
-extern crate libc;
-extern crate mmap;
+    (netmask, !netmask)
+}
 
 fn parse_ip(raw_ip: String) -> Result<Ip, String> {
     let split_ip: Vec<&str> = raw_ip.split(".").collect();
@@ -115,6 +110,77 @@ fn find_sub_cidr(min_ip: u32, cidr: Cidr) -> Result<Cidr, String> {
     Err("No cidr found for your network".to_string())
 }
 
+struct SubNet {
+    pub network: Ip,
+    pub first: Ip,
+    pub last: Ip,
+    pub broadcast: Ip,
+    pub cidr: Cidr,
+    pub nb_usable_ip: u32,
+}
+
+fn make_network(ip: Ip, cidr: Cidr, nb_usable_ip: u32) -> SubNet {
+    let network: Ip;
+    let first: Ip;
+    let last: Ip;
+    let broadcast: Ip;
+
+    if cidr == 32 {
+        network = ip;
+        first = ip;
+        last = ip;
+        broadcast = ip;
+    } else if cidr == 31 {
+        network = ip & 0xfffffffe;
+        first = network;
+        last = network + 1;
+        broadcast = last;
+    } else {
+        let (netmask, wildmask) = create_netmask(cidr);
+        network = ip & netmask;
+        first = network + 1;
+        broadcast = network + wildmask;
+        last = broadcast - 1;
+    }
+
+    SubNet {
+        network,
+        first,
+        last,
+        broadcast,
+        cidr,
+        nb_usable_ip,
+    }
+}
+
+fn stringify_network(subnet: &SubNet) -> String {
+    let network: [u8; 4] = subnet.network.to_be_bytes();
+    let first: [u8; 4] = subnet.first.to_be_bytes();
+    let last: [u8; 4] = subnet.last.to_be_bytes();
+    let broadcast: [u8; 4] = subnet.broadcast.to_be_bytes();
+
+    format!(
+            "{{\n\t\"network\": \"{}.{}.{}.{}\",\n\t\"first\": \"{}.{}.{}.{}\",\n\t\"last\": \"{}.{}.{}.{}\",\n\t\"broadcast\": \"{}.{}.{}.{}\",\n\t\"nbUsableIp\": {}\n}}",
+            network[0],
+            network[1],
+            network[2],
+            network[3],
+            first[0],
+            first[1],
+            first[2],
+            first[3],
+            last[0],
+            last[1],
+            last[2],
+            last[3],
+            broadcast[0],
+            broadcast[1],
+            broadcast[2],
+            broadcast[3],
+            subnet.nb_usable_ip
+        )
+}
+
 fn main() {
     let mut raw_ip = String::new();
     println!("Ip address (<ip>/<cidr>):");
@@ -124,64 +190,49 @@ fn main() {
     println!("Minimum number of usable ip per subnets:");
     stdin().read_line(&mut raw_nb).expect("failed to readline");
 
+    if std::path::Path::new("file.json").exists() {
+        std::fs::remove_file("file.json").expect("remove failed");
+    }
+
     let start = Instant::now();
 
     let (ip, cidr, min_ip) = parse_input(raw_ip, raw_nb).unwrap();
 
     let sub_cidr = find_sub_cidr(min_ip, cidr).unwrap();
 
-    let subnet = match SubNet::from(ip, cidr) {
-        Ok(s) => s,
-        Err(e) => panic!("{}", e),
-    };
+    let mut file: BufWriter<std::fs::File> =
+        BufWriter::new(std::fs::File::create("file.json").unwrap());
 
-    let subs = subnet.split_in_subs(sub_cidr);
+    let _ = file.write("[\n".as_bytes());
 
-    let b_write = Instant::now();
-    println!(
-        "before write (with serialisation) : {:?}",
-        b_write.duration_since(start)
-    );
+    let nb_subnet: u32 = (2 as u32).pow(sub_cidr - cidr);
+    let nb_usable_ip: u32 = (2 as u32).pow((32 - sub_cidr).into()) - 2;
 
-    if std::path::Path::new("file.json").exists() {
-        std::fs::remove_file("file.json").expect("remove failed");
+    let mut next_network = make_network(ip, sub_cidr, nb_usable_ip);
+
+    if nb_subnet == 1 {
+        file.write(stringify_network(&next_network).to_owned().as_bytes()).unwrap();
+
+        file.write("\n]".as_bytes()).unwrap();
+
+        let end = Instant::now();
+
+        println!("After write : {:?}", end.duration_since(start));
+
+        panic!();
     }
 
-    let mut f = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .open("file.json")
-        .unwrap();
+    for _i in 0..nb_subnet {
+        file.write(stringify_network(&next_network).to_owned().as_bytes()).unwrap();
 
-    let join_string:String = subs.unwrap().join("");
-    let src = join_string.to_owned();
-    let src_data = src.as_bytes();
-    let size = src.len();
-
-    // Allocate space in the file first
-    f.seek(SeekFrom::Start(size as u64)).unwrap();
-    f.write_all(&[0]).unwrap();
-    f.seek(SeekFrom::Start(0)).unwrap();
-
-    let mmap_opts = &[
-        // Then make the mapping *public* so it is written back to the file
-        MapOption::MapNonStandardFlags(libc::MAP_SHARED),
-        MapOption::MapReadable,
-        MapOption::MapWritable,
-        MapOption::MapFd(f.as_raw_fd()),
-    ];
-
-    let mmap = MemoryMap::new(size, mmap_opts).unwrap();
-
-    let data = mmap.data();
-
-    if data.is_null() {
-        panic!("Could not access data from memory mapped file")
+        next_network = make_network(
+            next_network.broadcast + 1,
+            next_network.cidr,
+            next_network.nb_usable_ip,
+        );
     }
-    unsafe {
-        ptr::copy(src_data.as_ptr(), data, src_data.len());
-    }
+
+    file.write("\n]".as_bytes()).unwrap();
 
     let end = Instant::now();
 
