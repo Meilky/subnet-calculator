@@ -67,7 +67,7 @@ fn main() {
         return;
     }
 
-    let nb_thread: u8 = 8;
+    let nb_thread: u8 = 16;
     let nb_subnet_per_subnet = nb_subnet / nb_thread as u32;
 
     let mut handles: Vec<JoinHandle<_>> = vec![];
@@ -106,6 +106,11 @@ fn main() {
         handle.join().unwrap();
     }
 
+
+    let compute = Instant::now();
+
+    println!("After compute : {:?}", compute.duration_since(start));
+
     for subnet in subnets.lock().unwrap().iter() {
         file.write_all(&subnet).unwrap();
     }
@@ -115,4 +120,6 @@ fn main() {
     let end = Instant::now();
 
     println!("After write : {:?}", end.duration_since(start));
+    
+    println!("Total write time: {:?}", end.duration_since(compute));
 }
