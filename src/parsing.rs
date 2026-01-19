@@ -1,13 +1,11 @@
-use crate::types::{Cidr,Ip};
-
-pub fn parse_ip(raw_ip: String) -> Result<Ip, String> {
+pub fn parse_ip(raw_ip: String) -> Result<u32, String> {
     let split_ip: Vec<&str> = raw_ip.split(".").collect();
 
     if split_ip.len() != 4 {
         return Err("The inserted value isn't an proprely formated ip!".to_string());
     }
 
-    let mut ip: Ip = 0;
+    let mut ip: u32 = 0;
     let base: u32 = 2;
 
     for i in 0..4 {
@@ -32,8 +30,8 @@ pub fn parse_ip(raw_ip: String) -> Result<Ip, String> {
     Ok(ip)
 }
 
-pub fn parse_cidr(raw_cidr: String) -> Result<Cidr, String> {
-    let cidr = raw_cidr.parse::<u32>().expect("Cidr isn't a number");
+pub fn parse_cidr(raw_cidr: String) -> Result<u8, String> {
+    let cidr = raw_cidr.trim().parse::<u8>().expect("Cidr isn't a number");
 
     if cidr > 32 {
         return Err("The cidr should be under 32!".to_string());
@@ -42,7 +40,7 @@ pub fn parse_cidr(raw_cidr: String) -> Result<Cidr, String> {
     Ok(cidr)
 }
 
-pub fn parse_min_nb(raw_nb: String, cidr: Cidr) -> Result<u32, String> {
+pub fn parse_min_nb(raw_nb: String, cidr: u8) -> Result<u32, String> {
     let base: u32 = 2;
     let nb: u32 = raw_nb
         .trim()
@@ -53,7 +51,7 @@ pub fn parse_min_nb(raw_nb: String, cidr: Cidr) -> Result<u32, String> {
         return Ok(0);
     }
 
-    if base.pow(32 - cidr) - 2 < nb {
+    if base.pow(32 - cidr as u32) - 2 < nb {
         return Err(
             "The min nb cannot be bigger then the max number of usable ip of the network"
                 .to_string(),
@@ -63,7 +61,7 @@ pub fn parse_min_nb(raw_nb: String, cidr: Cidr) -> Result<u32, String> {
     Ok(nb)
 }
 
-pub fn parse_input(raw_ip: String, raw_nb: String) -> Result<(Ip, Cidr, u32), String> {
+pub fn parse_input(raw_ip: String, raw_nb: String) -> Result<(u32, u8, u32), String> {
     let split_ip: Vec<&str> = raw_ip.trim().split("/").collect();
 
     if split_ip.len() != 2 {

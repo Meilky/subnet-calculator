@@ -1,6 +1,4 @@
-use crate::types::{Cidr,Ip};
-
-fn create_netmask(cidr: Cidr) -> (Ip, Ip) {
+fn create_netmask(cidr: u8) -> (u32, u32) {
     let right_len = 32 - cidr;
     let netmask = (u32::MAX >> right_len) << right_len;
 
@@ -8,20 +6,20 @@ fn create_netmask(cidr: Cidr) -> (Ip, Ip) {
 }
 
 pub struct SubNet {
-    pub network: Ip,
-    pub first: Ip,
-    pub last: Ip,
-    pub broadcast: Ip,
-    pub cidr: Cidr,
+    pub network: u32,
+    pub first: u32,
+    pub last: u32,
+    pub broadcast: u32,
     pub nb_usable_ip: u32,
+    pub cidr: u8,
 }
 
 impl SubNet {
-    pub fn new(ip: Ip, cidr: Cidr, nb_usable_ip: u32) -> SubNet {
-        let network: Ip;
-        let first: Ip;
-        let last: Ip;
-        let broadcast: Ip;
+    pub fn new(ip: u32, cidr: u8, nb_usable_ip: u32) -> SubNet {
+        let network: u32;
+        let first: u32;
+        let last: u32;
+        let broadcast: u32;
 
         if cidr == 32 {
             network = ip;
