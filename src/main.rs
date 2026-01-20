@@ -67,7 +67,7 @@ fn main() {
         return;
     }
 
-    let nb_thread: u8 = 16;
+    let nb_thread: u8 = 8;
     let nb_subnet_per_subnet = nb_subnet / nb_thread as u32;
 
     let mut handles: Vec<JoinHandle<_>> = vec![];
@@ -77,26 +77,28 @@ fn main() {
         let subnets = Arc::clone(&subnets);
 
         let handle = thread::spawn(move || {
-            let mut s: Vec<u8> = vec![];
+            let mut subnets_bytes: Vec<u8> = vec![];
+
+            let mut next_sub = SubNet::new(
+                next_network.network + (nb_subnet_per_subnet * (i as u32) * (nb_usable_ip + 2)),
+                sub_cidr,
+                nb_usable_ip,
+            );
 
             for j in (nb_subnet_per_subnet * i as u32)..(nb_subnet_per_subnet * (i + 1) as u32) {
                 if j == nb_subnet {
                     break;
                 }
 
-                let sub = SubNet::new(
-                    next_network.broadcast + 1,
-                    next_network.cidr,
-                    next_network.nb_usable_ip,
-                );
+                subnets_bytes.append(&mut next_sub.to_string().as_bytes().to_vec());
+                subnets_bytes.append(&mut ",".as_bytes().to_vec());
 
-                s.append(&mut sub.to_string().as_bytes().to_vec());
-                s.append(&mut ",".as_bytes().to_vec());
+                next_sub = SubNet::new(next_sub.broadcast + 1, next_sub.cidr, nb_usable_ip);
             }
 
             let mut subs = subnets.lock().unwrap();
 
-            subs.push(s);
+            subs.push(subnets_bytes);
         });
 
         handles.push(handle);
@@ -106,20 +108,21 @@ fn main() {
         handle.join().unwrap();
     }
 
-
     let compute = Instant::now();
 
-    println!("After compute : {:?}", compute.duration_since(start));
+    println!("Time to compute: {:?}", compute.duration_since(start));
 
     for subnet in subnets.lock().unwrap().iter() {
         file.write_all(&subnet).unwrap();
     }
 
+    let _ = file.write("\n]".as_bytes());
+
     file.flush().unwrap();
 
     let end = Instant::now();
 
-    println!("After write : {:?}", end.duration_since(start));
-    
-    println!("Total write time: {:?}", end.duration_since(compute));
+    println!("Time to write: {:?}", end.duration_since(compute));
+
+    println!("Total time: {:?}", end.duration_since(start));
 }
