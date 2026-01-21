@@ -240,6 +240,8 @@ fn main() {
 
     file.flush().unwrap();
 
+    file.into_inner().unwrap().sync_all().unwrap();
+
     let end = Instant::now();
 
     println!("Time to write: {:?}", end.duration_since(compute));
