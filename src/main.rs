@@ -39,6 +39,17 @@ fn ip_to_string(ip: u32) -> String {
     )
 }
 
+#[inline(always)]
+fn str_write_ip(ip: u32, itoa_buf: &mut itoa::Buffer, string: &mut String) {
+    string.push_str(itoa_buf.format(ip >> 24 & 0xFF));
+    string.push_str(".");
+    string.push_str(itoa_buf.format(ip >> 16 & 0xFF));
+    string.push_str(".");
+    string.push_str(itoa_buf.format(ip >> 8 & 0xFF));
+    string.push_str(".");
+    string.push_str(itoa_buf.format(ip & 0xFF));
+}
+
 fn make_subnet_bytes(
     network: u32,
     first: u32,
@@ -46,32 +57,21 @@ fn make_subnet_bytes(
     broadcast: u32,
     nb_usable_ip: u32,
 ) -> Vec<u8> {
-    let network_bytes: [u8; 4] = network.to_be_bytes();
-    let first_bytes: [u8; 4] = first.to_be_bytes();
-    let last_bytes: [u8; 4] = last.to_be_bytes();
-    let broadcast_bytes: [u8; 4] = broadcast.to_be_bytes();
+    let mut o = String::with_capacity(150); // seems to be the upper bound for a section
+    o.push_str("\t{\n\t\t\"Network\": \"");
+    let mut buffer = itoa::Buffer::new();
+    str_write_ip(network, &mut buffer, &mut o);
+    o.push_str("\",\n\t\t\"First\": \"");
+    str_write_ip(first, &mut buffer, &mut o);
+    o.push_str("\",\n\t\t\"Last\": \"");
+    str_write_ip(last, &mut buffer, &mut o);
+    o.push_str("\",\n\t\t\"Broadcast\": \"");
+    str_write_ip(broadcast, &mut buffer, &mut o);
+    o.push_str("\",\n\t\t\"Size\": \"");
+    o.push_str(buffer.format(nb_usable_ip));
+    o.push_str("\"\n\t}");
 
-    format!(
-                    //"{{\n\t\"network\": \"{}.{}.{}.{}\",\n\t\"first\": \"{}.{}.{}.{}\",\n\t\"last\": \"{}.{}.{}.{}\",\n\t\"broadcast\": \"{}.{}.{}.{}\",\n\t\"nbUsableIp\": {}\n}}",
-                    "\t{{\n\t\t\"Network\": \"{}.{}.{}.{}\",\n\t\t\"First\": \"{}.{}.{}.{}\",\n\t\t\"Last\": \"{}.{}.{}.{}\",\n\t\t\"Broadcast\": \"{}.{}.{}.{}\",\n\t\t\"Size\": \"{}\"\n\t}}",
-                    network_bytes[0],
-                    network_bytes[1],
-                    network_bytes[2],
-                    network_bytes[3],
-                    first_bytes[0],
-                    first_bytes[1],
-                    first_bytes[2],
-                    first_bytes[3],
-                    last_bytes[0],
-                    last_bytes[1],
-                    last_bytes[2],
-                    last_bytes[3],
-                    broadcast_bytes[0],
-                    broadcast_bytes[1],
-                    broadcast_bytes[2],
-                    broadcast_bytes[3],
-                    nb_usable_ip
-                ).as_bytes().to_vec()
+    return o.into_bytes();
 }
 
 fn main() {
@@ -108,7 +108,7 @@ fn main() {
 
     let nb_subnet_per_thread = nb_subnet / nb_thread as u32;
 
-    let _ = file.write("[\n".as_bytes());
+    file.write("[\n".as_bytes()).unwrap();
 
     let first_network = ip & sub_netmask;
 
@@ -153,6 +153,7 @@ fn main() {
         file.write("]".as_bytes()).unwrap();
 
         file.flush().unwrap();
+        file.into_inner().unwrap().sync_all().unwrap();
 
         let end = Instant::now();
 
@@ -204,7 +205,7 @@ fn main() {
                     broadcast,
                     nb_usable_ip_per_subnet,
                 ));
-                subnets_bytes.append(&mut ",\n".as_bytes().to_vec());
+                subnets_bytes.append(&mut vec![b',', b'\n']);
 
                 network = broadcast + 1;
                 first = network + 1;
@@ -233,7 +234,7 @@ fn main() {
     for i in 0..nb_thread {
         let (_, subnet) = subnets.iter().find(|(id, _)| *id == i).unwrap();
 
-        file.write_all(&subnet).unwrap();
+        file.write_all(subnet).unwrap();
     }
 
     let _ = file.write("]".as_bytes());
