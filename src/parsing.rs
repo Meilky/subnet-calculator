@@ -61,7 +61,24 @@ pub fn parse_min_nb(raw_nb: String, cidr: u8) -> Result<u32, String> {
     Ok(nb)
 }
 
-pub fn parse_input(raw_ip: String, raw_nb: String) -> Result<(u32, u8, u32), String> {
+pub fn parse_nb_thread(raw_nb_thread: String) -> Result<u8, String> {
+    let thread = raw_nb_thread
+        .trim()
+        .parse::<u8>()
+        .expect("Number of thread isn't a number");
+
+    if thread > 32 {
+        return Err("The number of thread should be <= 32!".to_string());
+    }
+
+    Ok(thread)
+}
+
+pub fn parse_input(
+    raw_ip: String,
+    raw_nb: String,
+    raw_nb_thread: String,
+) -> Result<(u32, u8, u32, u8), String> {
     let split_ip: Vec<&str> = raw_ip.trim().split("/").collect();
 
     if split_ip.len() != 2 {
@@ -71,6 +88,7 @@ pub fn parse_input(raw_ip: String, raw_nb: String) -> Result<(u32, u8, u32), Str
     let ip = parse_ip(split_ip.get(0).expect("No ip provided").to_string())?;
     let cidr = parse_cidr(split_ip.get(1).expect("No cidr provided").to_string())?;
     let min_nb: u32 = parse_min_nb(raw_nb, cidr)?;
+    let nb_thread = parse_nb_thread(raw_nb_thread)?;
 
-    Ok((ip, cidr, min_nb))
+    Ok((ip, cidr, min_nb, nb_thread))
 }
